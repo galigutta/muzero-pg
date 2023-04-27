@@ -1,11 +1,22 @@
 """
-This is a very simple form of twenty one. Ace only counts as value 1 not 1 or
-11 for simplicity. This means that there is no such thing as a natural or two
-card 21. This is a good example of showing how it can provide a good solution
-to even luck based games.
+This is a practice game setup where there are 5 slots where a trade can be placed.
+Every period the trade generates a return, and the return deteriorates over time
+The detrioration is stochastic. (The stochastic part may be implemented later)
+
+At some point, the trade will start making negative returns, and the agent will
+have to replace the trade with a new one. The agent can only replace one trade
+per turn. The optimal replacement will be well before the trade turns negative,
+or even before break-even.
+
+The idea is to see how well the agent learns the optimal replacement strategy,
+with and without the stochastic element.
+
+There are questions of legal moves, where a trade cannot be placed in a slot that
+is already occupied. Also if a trade slot is empty it cannot obviously be closed.
 """
 
 import datetime
+import math
 import pathlib
 
 import numpy
@@ -21,12 +32,16 @@ class MuZeroConfig:
 
         self.seed = 0  # Seed for numpy, torch and the game
         self.max_num_gpus = 1  # Fix the maximum number of GPUs to use. It's usually faster to use a single GPU (set it to 1) if it has enough memory. None will use every GPUs available
-
+        
+        
 
 
         ### Game
-        self.observation_shape = (3,3,3) # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
-        self.action_space = list(range(2)) # Fixed list of all possible actions. You should only edit the length
+        self.n_slots = 5 # Number of slots for trades
+        self.observation_shape = (1,1,self.n_slots*2) # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
+        # above is just a 1-d array of n_slots * 2, each indicating the last return of the slot, and the number of periods since the trade was opened
+        self.action_space = list(range(self.n_slots + 2)) # Fixed list of all possible actions. You should only edit the length
+        # The agent can open a trade (which goes into the first empty slot), close a specific trade, or do nothing: 1 + n_slots + 1
         self.players = list(range(1)) # List of players. You should only edit the length
         self.stacked_observations = 0 # Number of previous observations and previous actions to add to the current observation
 
@@ -37,11 +52,11 @@ class MuZeroConfig:
 
 
         ### Self-Play
-        self.num_workers = 4 # Number of simultaneous threads/workers self-playing to feed the replay buffer
+        self.num_workers = 12 # Number of simultaneous threads/workers self-playing to feed the replay buffer
         self.selfplay_on_gpu = False
         self.max_moves = 21 # Maximum number of moves if game is not finished before
         self.num_simulations = 21 # Number of future moves self-simulated
-        self.discount = 1 # Chronological discount of the reward
+        self.discount = 0.85 # Chronological discount of the reward
         self.temperature_threshold = None  # Number of moves before dropping the temperature given by visit_softmax_temperature_fn to 0 (ie selecting the best action). If None, visit_softmax_temperature_fn is used every time
 
         # Root prior exploration noise
@@ -82,11 +97,12 @@ class MuZeroConfig:
         ### Training
         self.results_path = pathlib.Path(__file__).resolve().parents[1] / "results" / pathlib.Path(__file__).stem / datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S")  # Path to store the model weights and TensorBoard logs
         self.save_model = True  # Save the checkpoint in results_path as model.checkpoint
-        self.training_steps = 150  # Total number of training steps (ie weights update according to a batch)
+        self.training_steps = 30000  # Total number of training steps (ie weights update according to a batch)
         self.batch_size = 64  # Number of parts of games to train on at each training step
-        self.checkpoint_interval = 10  # Number of training steps before using the model for self-playing
+        self.checkpoint_interval = 200  # Number of training steps before using the model for self-playing
         self.value_loss_weight = 0.25  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
         self.train_on_gpu = torch.cuda.is_available()  # Train on GPU if available
+        # self.train_on_gpu = False
 
         self.optimizer = "SGD"  # "Adam" or "SGD". Paper uses SGD
         self.weight_decay = 1e-4  # L2 weights regularization
@@ -95,7 +111,8 @@ class MuZeroConfig:
         # Exponential learning rate schedule
         self.lr_init = 0.03  # Initial learning rate
         self.lr_decay_rate = 0.75  # Set it to 1 to use a constant learning rate
-        self.lr_decay_steps = 150000
+        # self.lr_decay_steps = 150000
+        self.lr_decay_steps = self.training_steps / 10
 
 
 
@@ -125,22 +142,28 @@ class MuZeroConfig:
 
         Returns:
             Positive float.
-        """
+        
         if trained_steps < 500e3:
             return 1.0
         elif trained_steps < 750e3:
             return 0.5
         else:
-            return 0.25
-
-
+            return 0.05
+            # return 0.25
+        
+        start_value, end_value, total_steps = 0.2, 0.01, self.training_steps
+        decay_rate = math.log(end_value / start_value) / total_steps
+        return start_value * math.exp(decay_rate * trained_steps)
+        """
+        return 0.05
+    
 class Game(AbstractGame):
     """
     Game wrapper.
     """
 
     def __init__(self, seed=None):
-        self.env = TwentyOne(seed)
+        self.env = TraderDegen(seed)
 
     def step(self, action):
         """
@@ -186,17 +209,19 @@ class Game(AbstractGame):
         """
         return self.env.reset()
 
+
     def get_observation(self):
-        return self.env.get_observation()
-        
+        return self.env.get_observation()    
+    
     def render(self):
         """
         Display the game observation.
         """
         self.env.render()
-        input("Press enter to take a step ")
+        # input("Press enter to take a step ")
 
     def human_to_action(self):
+        return self.env.human_to_action()
         """
         For multiplayer games, ask the user for a legal action
         and return the corresponding action number.
@@ -221,91 +246,118 @@ class Game(AbstractGame):
         Returns:
             String representing the action.
         """
-        actions = {
-            0: "Hit",
-            1: "Stand",
-        }
-        return f"{action_number}. {actions[action_number]}"
+        # actions = {
+        #     "x": "Hit",
+        #     1: "Stand",
+        # }
+        return self.env.action_to_string(action_number)
 
 
-class TwentyOne:
+class TraderDegen:
     def __init__(self, seed):
         self.random = numpy.random.RandomState(seed)
+        self.nslots = 5
+        # age slots + return slots
+        self.obs = [0]*self.nslots + [0]*self.nslots
+        self.episode_len = 30
+        self.step_count = 0
+        self.step_rew = 0
+        self.episode_rew = 0
 
-        self.player_hand = self.deal_card_value()
-        self.dealer_hand = self.deal_card_value()
 
-        self.player = 1
 
     def to_play(self):
-        return 0 if self.player == 1 else 1
+        return 0 # should always return 0 as there iy is always players turn
+        # return 0 if self.player == 1 else 1 # should always return 0
 
     def reset(self):
-        self.player_hand = self.deal_card_value()
-        self.dealer_hand = self.deal_card_value()
-        self.player = 1
+        self.obs = [0]*self.nslots + [0]*self.nslots
+        self.step_count = 0
+        self.episode_rew = 0
+
         return self.get_observation()
 
-    """
-    Action: 0 = Hit
-    Action: 1 = Stand
-    """
-
-    def step(self, action):
-
-        if action == 0:
-            self.player_hand += self.deal_card_value()
-
-        done = self.is_busted() or action == 1 or self.player_hand == 21
-
-        if done:
-            self.dealer_plays()
-
-        return self.get_observation(), self.get_reward(done), done
+        
 
     def get_observation(self):
-        return [
-            numpy.full((3, 3), self.player_hand, dtype="float32"),
-            numpy.full((3, 3), self.dealer_hand, dtype="float32"),
-            numpy.full((3, 3), 0),
-        ]
+        return [[self.obs]]
 
+    def action_to_string(self, action_number):
+        if action_number < self.nslots:
+            return f'Close the trade in position {action_number}'
+        elif action_number == self.nslots:
+            return f'Do nothing - wait'
+        elif action_number == self.nslots +1:
+            return f'Open new trade'
+    
     def legal_actions(self):
-        # 0 = hit
-        # 1 = stand
-        return [0, 1]
+        opentrade = []
+        # always an option to do nothing
+        donothing = [self.nslots]
+        # if there is space to open a trade, add that option
+        if numpy.any(numpy.array(self.obs[:self.nslots]) == 0):
+            opentrade = [self.nslots + 1]
+        # pick the non zero ements for closing options
+        close_options = list(numpy.nonzero(numpy.array(self.obs[:self.nslots]))[0])
+        return close_options + donothing + opentrade
+    
+    def human_to_action(self):
+        choice = input(
+            f"Enter the action {self.nslots} Do nothing, or {self.nslots + 1} to open trade or index of trade to close: "
+        )
+        while choice not in [str(action) for action in self.legal_actions()]:
+            choice = input("Enter a legal trade")
+        return int(choice)
 
+    def step(self, action):
+        self.step_count += 1
+        done = (self.step_count == self.episode_len)
+        age_arr = numpy.array(self.obs[:self.nslots])
+        ret_arr = numpy.array(self.obs[self.nslots:])
+
+        # increment all not zeros by 1
+        age_arr = numpy.where(age_arr == 0,0,age_arr+1)
+        
+        # if opening trade
+        if action == self.nslots+1:
+            for i, el in enumerate(age_arr):
+                if el == 0:
+                    age_arr[i] = 1
+                    break
+                    
+        
+        # if closing trade
+        if action < self.nslots:
+            age_arr[action] = 0
+        
+        # if no action
+        if action == self.nslots:
+            pass
+        
+        # generate an array or random normal returns with mean 1 and stdev of 0.1
+        ret_arr = numpy.where(age_arr == 0,0,numpy.random.normal(1,0.1,self.nslots))
+        
+        # penalize by age**2; reduce the return by age**2 *0.03, where age is not 0
+        ret_arr = ret_arr - numpy.where(age_arr == 0,0,(age_arr**2) *0.03)
+        
+        # calculate the reward for the step and episode:
+        self.step_rew = numpy.sum(ret_arr)
+        self.episode_rew += self.step_rew
+        
+        self.obs = list(age_arr) + list(ret_arr)
+        
+        return self.get_observation(), self.get_reward(done), done
+                
     def get_reward(self, done):
         if not done:
-            return 0
-        if self.player_hand <= 21 and self.dealer_hand < self.player_hand:
-            return 1
-        if self.player_hand <= 21 and self.dealer_hand > 21:
-            return 1
-        if self.player_hand > 21:
-            return -1
-        if self.player_hand == self.dealer_hand:
-            return 0
-        return -1
-
-    def deal_card_value(self):
-        card = self.random.randint(1, 13)
-        if card >= 10:
-            value = 10
+            return self.step_rew
         else:
-            value = card
-        return value
+            return 0
 
-    def dealer_plays(self):
-        if self.player_hand > 21:
-            return
-        while self.dealer_hand <= 16:
-            self.dealer_hand += self.deal_card_value()
 
-    def is_busted(self):
-        if self.player_hand > 21:
-            return True
 
     def render(self):
-        print("Dealer hand: " + str(self.dealer_hand))
-        print("Player hand: " + str(self.player_hand))
+        print("Slots status: " + str(self.obs))
+        print(f"step count: {self.step_count}, step reward {self.step_rew}, episode reward {self.episode_rew}" )
+        
+

@@ -169,6 +169,11 @@ class ReplayBuffer:
             game_prob_dict = dict(
                 [(game_id, prob) for game_id, prob in zip(game_id_list, game_probs)]
             )
+            # Check for nan in game_probs
+            if numpy.isnan(game_probs).any():
+                print("game_probs: ", game_probs)
+                print("game_probs sum: ", numpy.sum(game_probs))
+            
             selected_games = numpy.random.choice(game_id_list, n_games, p=game_probs)
         else:
             selected_games = numpy.random.choice(list(self.buffer.keys()), n_games)

@@ -1,14 +1,16 @@
 import math
 import time
+import importlib
 
 import numpy
 import ray
 import torch
 
 import models
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "5"
 
-
-@ray.remote
+# @ray.remote
 class SelfPlay:
     """
     Class which run in a dedicated thread to play games and save them to the replay-buffer.
@@ -568,3 +570,41 @@ class MinMaxStats:
             # We normalize only when we have set the maximum and minimum values
             return (value - self.minimum) / (self.maximum - self.minimum)
         return value
+
+
+def get_initial_weights(config):
+    model = models.MuZeroNetwork(config)
+    weigths = model.get_weights()
+    summary = str(model).replace("\n", " \n\n")
+    return weigths, summary
+
+if __name__ == "__main__":
+    game_name = "traderdegen"
+    # game_name = "twentyone"
+    game_module = importlib.import_module("games." + game_name)
+    Game = game_module.Game
+    config = game_module.MuZeroConfig()
+    checkpoint = {
+        "weights": None,
+        "optimizer_state": None,
+        "total_reward": 0,
+        "muzero_reward": 0,
+        "opponent_reward": 0,
+        "episode_length": 0,
+        "mean_value": 0,
+        "training_step": 0,
+        "lr": 0,
+        "total_loss": 0,
+        "value_loss": 0,
+        "reward_loss": 0,
+        "policy_loss": 0,
+        "num_played_games": 0,
+        "num_played_steps": 0,
+        "num_reanalysed_games": 0,
+        "terminate": False,
+    }
+    checkpoint["weights"], summary = get_initial_weights(config)
+    self_play_worker = SelfPlay(checkpoint, Game, config, config.seed)
+    game_history = self_play_worker.play_game(0,config.temperature_threshold, False,"self",config.muzero_player)
+    print('good so far. config.seed = ', config.seed)
+    print('game_history = ', game_history)

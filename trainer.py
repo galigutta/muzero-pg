@@ -94,7 +94,8 @@ class Trainer:
                     }
                 )
                 if self.config.save_model:
-                    shared_storage.save_checkpoint.remote()
+                    path = self.config.results_path / f"model.checkpoint_{self.training_step}"
+                    shared_storage.save_checkpoint.remote(path)
             shared_storage.set_info.remote(
                 {
                     "training_step": self.training_step,
