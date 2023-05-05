@@ -52,11 +52,11 @@ class MuZeroConfig:
 
 
         ### Self-Play
-        self.num_workers = 12 # Number of simultaneous threads/workers self-playing to feed the replay buffer
+        self.num_workers = 8 # Number of simultaneous threads/workers self-playing to feed the replay buffer
         self.selfplay_on_gpu = False
         self.max_moves = 21 # Maximum number of moves if game is not finished before
         self.num_simulations = 21 # Number of future moves self-simulated
-        self.discount = 0.85 # Chronological discount of the reward
+        self.discount = 0.99 # Chronological discount of the reward
         self.temperature_threshold = None  # Number of moves before dropping the temperature given by visit_softmax_temperature_fn to 0 (ie selecting the best action). If None, visit_softmax_temperature_fn is used every time
 
         # Root prior exploration noise
@@ -70,22 +70,22 @@ class MuZeroConfig:
 
 
         ### Network
-        self.network = "resnet"  # "resnet" / "fullyconnected"
-        self.support_size = 10  # Value and reward are scaled (with almost sqrt) and encoded on a vector with a range of -support_size to support_size. Choose it so that support_size <= sqrt(max(abs(discounted reward)))
+        self.network = "fullyconnected"  # "resnet" / "fullyconnected"
+        self.support_size = 40  # Value and reward are scaled (with almost sqrt) and encoded on a vector with a range of -support_size to support_size. Choose it so that support_size <= sqrt(max(abs(discounted reward)))
 
         # Residual Network
         self.downsample = False  # Downsample observations before representation network, False / "CNN" (lighter) / "resnet" (See paper appendix Network Architecture)
         self.blocks = 2  # Number of blocks in the ResNet
-        self.channels = 32  # Number of channels in the ResNet
-        self.reduced_channels_reward = 32  # Number of channels in reward head
-        self.reduced_channels_value = 32  # Number of channels in value head
-        self.reduced_channels_policy = 32  # Number of channels in policy head
+        self.channels = 10  # Number of channels in the ResNet
+        self.reduced_channels_reward = self.channels  # Number of channels in reward head
+        self.reduced_channels_value = self.channels  # Number of channels in value head
+        self.reduced_channels_policy = self.channels  # Number of channels in policy head
         self.resnet_fc_reward_layers = [16]  # Define the hidden layers in the reward head of the dynamic network
         self.resnet_fc_value_layers = [16]  # Define the hidden layers in the value head of the prediction network
         self.resnet_fc_policy_layers = [16]  # Define the hidden layers in the policy head of the prediction network
 
         # Fully Connected Network
-        self.encoding_size = 32
+        self.encoding_size = 16
         self.fc_representation_layers = [16]  # Define the hidden layers in the representation network
         self.fc_dynamics_layers = [16]  # Define the hidden layers in the dynamics network
         self.fc_reward_layers = [16]  # Define the hidden layers in the reward network
@@ -97,14 +97,14 @@ class MuZeroConfig:
         ### Training
         self.results_path = pathlib.Path(__file__).resolve().parents[1] / "results" / pathlib.Path(__file__).stem / datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S")  # Path to store the model weights and TensorBoard logs
         self.save_model = True  # Save the checkpoint in results_path as model.checkpoint
-        self.training_steps = 30000  # Total number of training steps (ie weights update according to a batch)
+        self.training_steps = 5_000  # Total number of training steps (ie weights update according to a batch)
         self.batch_size = 64  # Number of parts of games to train on at each training step
         self.checkpoint_interval = 200  # Number of training steps before using the model for self-playing
         self.value_loss_weight = 0.25  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
         self.train_on_gpu = torch.cuda.is_available()  # Train on GPU if available
         # self.train_on_gpu = False
 
-        self.optimizer = "SGD"  # "Adam" or "SGD". Paper uses SGD
+        self.optimizer = "Adam"  # "Adam" or "SGD". Paper uses SGD
         self.weight_decay = 1e-4  # L2 weights regularization
         self.momentum = 0.9  # Used only if optimizer is SGD
 
@@ -125,7 +125,7 @@ class MuZeroConfig:
 
         # Reanalyze (See paper appendix Reanalyse)
         self.use_last_model_value = True  # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
-        self.reanalyse_on_gpu = False
+        self.reanalyse_on_gpu = torch.cuda.is_available() #False
 
 
 
@@ -150,12 +150,12 @@ class MuZeroConfig:
         else:
             return 0.05
             # return 0.25
-        
-        start_value, end_value, total_steps = 0.2, 0.01, self.training_steps
+        """
+        start_value, end_value, total_steps = 0.75, 0.2, self.training_steps
         decay_rate = math.log(end_value / start_value) / total_steps
         return start_value * math.exp(decay_rate * trained_steps)
-        """
-        return 0.05
+        
+        # return 0.2
     
 class Game(AbstractGame):
     """

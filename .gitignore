@@ -98,3 +98,6 @@ prometheus-2.43.0.linux-amd64/
 results/
 grafana-enterprise-9.4.7.linux-amd64.tar.gz
 prometheus-2.43.0.linux-amd64.tar.gz
+zray.py
+*scratch*
+zscratch.ipynb

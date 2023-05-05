@@ -64,6 +64,7 @@ class Trainer:
             time.sleep(0.1)
 
         next_batch = replay_buffer.get_batch.remote()
+        # The above next_batch call is just to initialize the next_batch variable
         # Training loop
         while self.training_step < self.config.training_steps and not ray.get(
             shared_storage.get_info.remote("terminate")

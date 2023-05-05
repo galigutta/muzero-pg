@@ -68,6 +68,7 @@ class ReplayBuffer:
         return self.buffer
 
     def get_batch(self):
+        # print("calling get_batch")
         (
             index_batch,
             observation_batch,
@@ -175,6 +176,7 @@ class ReplayBuffer:
                 print("game_probs sum: ", numpy.sum(game_probs))
             
             selected_games = numpy.random.choice(game_id_list, n_games, p=game_probs)
+            # print(f"number of selected games: {len(selected_games)} out of {len(self.buffer)}")
         else:
             selected_games = numpy.random.choice(list(self.buffer.keys()), n_games)
             game_prob_dict = {}

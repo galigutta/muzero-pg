@@ -209,7 +209,7 @@ def conv3x3(in_channels, out_channels, stride=1):
     )
 
 
-# Residual block
+# Residual block - This is the original. Renamed it to ResidualBlockOrig
 class ResidualBlock(torch.nn.Module):
     def __init__(self, num_channels, stride=1):
         super().__init__()
@@ -228,6 +228,24 @@ class ResidualBlock(torch.nn.Module):
         out = torch.nn.functional.relu(out)
         return out
 
+# This is the altenative using fully connected layers instead of convolutions #not working as of now
+class ResidualBlockFC(torch.nn.Module):
+    def __init__(self, num_channels, stride=1):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(num_channels, num_channels)
+        self.bn1 = torch.nn.BatchNorm1d(num_channels)
+        self.fc2 = torch.nn.Linear(num_channels, num_channels)
+        self.bn2 = torch.nn.BatchNorm1d(num_channels)
+
+    def forward(self, x):
+        out = self.fc1(x)
+        out = self.bn1(out)
+        out = torch.nn.functional.relu(out)
+        out = self.fc2(out)
+        out = self.bn2(out)
+        out += x
+        out = torch.nn.functional.relu(out)
+        return out
 
 # Downsample observations before representation network (See paper appendix Network Architecture)
 class DownSample(torch.nn.Module):
